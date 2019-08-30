@@ -587,6 +587,7 @@ class Editor:
         self.current_path = ''  # Directory of last loaded file.
         self.global_replace = False
         self.selecting_mode = False  # Flag to stop auto-detection of modes.
+        self.detect_new_device = None
         if not os.path.exists(DATA_DIR):
             logger.debug('Creating directory: {}'.format(DATA_DIR))
             os.makedirs(DATA_DIR)
