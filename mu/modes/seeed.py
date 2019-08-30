@@ -483,7 +483,7 @@ class SeeedMode(MicroPythonMode):
         )
         self.invoke.info = SeeedMode.info
         self.invoke.start()
-        # self.view.default_pane = SeeedFileSystemPane
+        self.view.default_pane = SeeedFileSystemPane
         ArdupyDeviceFileList.info = SeeedMode.info
         editor.detect_new_device_handle = \
             self.__asyc_detect_new_device_handle

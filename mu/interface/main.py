@@ -198,7 +198,9 @@ class Window(QMainWindow):
     open_file = pyqtSignal(str)
     load_theme = pyqtSignal(str)
     previous_folder = None
-    default_pane = FileSystemPane
+
+    def __init__(self):
+        self.default_pane = FileSystemPane
 
     def set_zoom(self):
         """
