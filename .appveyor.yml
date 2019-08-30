@@ -35,7 +35,7 @@ init:
 install:
   # Install Mu Python dependencies
   - cmd: pip install .[dev]
-  - cmd: pip install python3-wget
+  - cmd: pip install wget
   - cmd: make check
   
   # Check installed packages
