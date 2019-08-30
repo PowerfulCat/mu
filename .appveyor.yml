@@ -36,6 +36,7 @@ install:
   # Install Mu Python dependencies
   - cmd: pip install .[dev]
   - cmd: pip install python3-wget
+  - cmd: make check
   
   # Check installed packages
   - cmd: pip freeze
@@ -54,9 +55,6 @@ install:
 
 # Not a project with an msbuild file, build done at install.
 build: None
-
-test_script:
-  - cmd: make check
 
 # Push artifacts to s3 bucket and list all
 after_test:
