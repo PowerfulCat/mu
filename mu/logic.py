@@ -1252,6 +1252,9 @@ class Editor:
                     logger.info('Autosave detected and saved '
                                 'changes in {}.'.format(tab.path))
 
+    def set_detect_new_device_handle(self, value):
+        self.detect_new_device = value
+
     def check_usb(self):
         """
         Ensure connected USB devices are polled. If there's a change and a new
@@ -1284,6 +1287,8 @@ class Editor:
                 device_name = self.modes[mode_name].name
                 msg = _('Detected new {} device.').format(device_name)
                 self.show_status_message(msg)
+                if self.detect_new_device is None:
+                    self.detect_new_device(device[1])
                 # Only ask to switch mode if a single device type is connected
                 # and we're not already trying to select a new mode via the
                 # dialog. Cannot change mode if a script is already being run
