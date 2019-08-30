@@ -1,0 +1,8 @@
+{
+    "boot" : [
+        { "name" : "ardupy-seeeduino-m0", "pvid" : [ 10374, 39 ] }
+    ],
+    "normal" : [
+        { "name" : "ardupy-seeeduino-m0", "pvid" : [ 9025, 32845 ] }
+    ]
+}
