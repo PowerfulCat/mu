@@ -710,7 +710,7 @@ class SeeedMode(MicroPythonMode):
         self.fs = self.view.add_filesystem(
             self.workspace_dir(),
             self.file_manager,
-            "Seeed's line of boards"
+            _("Seeed's line of boards")
         )
         self.fs.set_message.connect(self.editor.show_status_message)
         self.fs.set_warning.connect(self.view.show_message)
