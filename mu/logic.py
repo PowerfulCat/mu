@@ -587,7 +587,7 @@ class Editor:
         self.current_path = ''  # Directory of last loaded file.
         self.global_replace = False
         self.selecting_mode = False  # Flag to stop auto-detection of modes.
-        self.detect_new_device = None
+        self.detect_new_device_handle = None
         if not os.path.exists(DATA_DIR):
             logger.debug('Creating directory: {}'.format(DATA_DIR))
             os.makedirs(DATA_DIR)
@@ -1253,9 +1253,6 @@ class Editor:
                     logger.info('Autosave detected and saved '
                                 'changes in {}.'.format(tab.path))
 
-    def set_detect_new_device_handle(self, value):
-        self.detect_new_device = value
-
     def check_usb(self):
         """
         Ensure connected USB devices are polled. If there's a change and a new
@@ -1288,8 +1285,8 @@ class Editor:
                 device_name = self.modes[mode_name].name
                 msg = _('Detected new {} device.').format(device_name)
                 self.show_status_message(msg)
-                if self.detect_new_device is not None:
-                    self.detect_new_device(device[1])
+                if self.detect_new_device_handle is not None:
+                    self.detect_new_device_handle(device[1])
                 # Only ask to switch mode if a single device type is connected
                 # and we're not already trying to select a new mode via the
                 # dialog. Cannot change mode if a script is already being run

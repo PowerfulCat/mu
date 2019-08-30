@@ -619,9 +619,8 @@ class SeeedMode(MicroPythonMode):
         self.invoke.info = SeeedMode.info
         self.invoke.start()
         ArdupyDeviceFileList.info = SeeedMode.info
-        editor.set_detect_new_device_handle(
+        editor.detect_new_device_handle = \
             self.__asyc_detect_new_device_handle
-        )
 
     def __set_all_button(self, state):
         self.set_buttons(files=state, run=state, repl=state, plotter=state)
