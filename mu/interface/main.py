@@ -201,7 +201,7 @@ class Window(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.default_pane = FileSystemPane
+        self.default_pane = None
 
     def set_zoom(self):
         """
@@ -397,7 +397,10 @@ class Window(QMainWindow):
         """
         Adds the file system pane to the application.
         """
-        self.fs_pane = self.default_pane(home)
+        if self.default_pane is not None:
+            self.fs_pane = self.default_pane(home)
+        else:
+            self.fs_pane = FileSystemPane(home)
 
         @self.fs_pane.open_file.connect
         def on_open_file(file):
