@@ -483,6 +483,7 @@ class SeeedMode(MicroPythonMode):
         )
         self.invoke.info = SeeedMode.info
         self.invoke.start()
+        # self.view.default_pane = SeeedFileSystemPane
         ArdupyDeviceFileList.info = SeeedMode.info
         editor.detect_new_device_handle = \
             self.__asyc_detect_new_device_handle
@@ -706,7 +707,6 @@ class SeeedMode(MicroPythonMode):
         self.file_manager = FileManager(device_port)
         self.file_manager.moveToThread(self.file_manager_thread)
         self.file_manager_thread.started.connect(self.file_manager.on_start)
-        #self.view.default_pane = SeeedFileSystemPane
         self.fs = self.view.add_filesystem(
             self.workspace_dir(),
             self.file_manager,
