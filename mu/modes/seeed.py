@@ -27,13 +27,12 @@ import shutil
 from serial import Serial
 from mu.modes.api import SEEED_APIS, SHARED_APIS
 from mu.modes.base import MicroPythonMode, FileManager
-from mu.interface.themes import Font, DEFAULT_FONT_SIZE
 from mu.interface.panes import CHARTS, \
-    MicroPythonDeviceFileList, FileSystemPane, PANE_ZOOM_SIZES
+    MicroPythonDeviceFileList, FileSystemPane
 from PyQt5.QtCore import pyqtSignal, QThread, Qt
 from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
-from PyQt5.QtWidgets import QMessageBox, QFrame, QGridLayout, \
-    QLabel, QMenu, QTreeWidget, QTreeWidgetItem, QAbstractItemView
+from PyQt5.QtWidgets import QMessageBox, \
+    QMenu, QTreeWidget, QTreeWidgetItem, QAbstractItemView
 from PyQt5.QtGui import QIcon
 
 logger = logging.getLogger(__name__)
