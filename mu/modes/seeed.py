@@ -46,7 +46,7 @@ class Info:
     dic_config = {}
     board_id = None
     board_name = None
-    info_path = path('info.json', 'seeed/')
+    info_path = path('info.json', 'pygamezero/seeed/')
 
     def __init__(self):
         file = open(Info.info_path, 'r')
@@ -88,7 +88,7 @@ class Info:
 
     @property
     def config_path(self):
-        return path(self.dic_config[self.board_id], 'seeed/')
+        return path(self.dic_config[self.board_id], 'pygamezero/seeed/')
 
     @property
     def version(self):
@@ -100,7 +100,7 @@ class Info:
 
     @property
     def local_firmware(self):
-        return path(self.__config['firmware']['name'], 'seeed/')
+        return path(self.__config['firmware']['name'], 'pygamezero/seeed/')
 
     @property
     def firmware_name(self):
@@ -117,7 +117,7 @@ class Info:
     def bossac(self):
         cmd = 'bossac.exe -i -d --port=%s -U true -i -e -w -v %s -R' \
             % (self.short_device_name, self.local_firmware)
-        return path(cmd, 'seeed/')
+        return path(cmd, 'pygamezero/seeed/')
 
     @property
     def stty(self):
