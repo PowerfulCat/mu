@@ -29,11 +29,11 @@ from mu.modes.api import SEEED_APIS, SHARED_APIS
 from mu.modes.base import MicroPythonMode, FileManager
 from mu.interface.panes import CHARTS, \
     MicroPythonDeviceFileList, FileSystemPane
+from mu.resources import load_icon, path
 from PyQt5.QtCore import pyqtSignal, QThread, Qt
 from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
 from PyQt5.QtWidgets import QMessageBox, \
     QMenu, QTreeWidget, QTreeWidgetItem, QAbstractItemView
-from PyQt5.QtGui import QIcon
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +46,7 @@ class Info:
     dic_config = {}
     board_id = None
     board_name = None
-
-    resources_path = 'mu/resources/seeed/'
-    info_path = resources_path + 'info.json'
-    icon_path = resources_path + 'icon/'
+    info_path = path('info.json', 'seeed/')
 
     def __init__(self):
         file = open(Info.info_path, 'r')
@@ -79,8 +76,6 @@ class Info:
             self.__stty = 'MODE %s:BAUD=1200'
         else:
             raise NotImplementedError('not implement stty.')
-        self.__bossac = self.resources_path + \
-            'bossac.exe -i -d --port=%s -U true -i -e -w -v %s -R'
 
     def load_config(self):
         file = open(self.config_path, 'r')
@@ -93,7 +88,7 @@ class Info:
 
     @property
     def config_path(self):
-        return self.resources_path + self.dic_config[self.board_id]
+        return path(self.dic_config[self.board_id], 'seeed/')
 
     @property
     def version(self):
@@ -105,7 +100,7 @@ class Info:
 
     @property
     def local_firmware(self):
-        return self.resources_path + self.__config['firmware']['name']
+        return path(self.__config['firmware']['name'], 'seeed/')
 
     @property
     def firmware_name(self):
@@ -120,7 +115,9 @@ class Info:
 
     @property
     def bossac(self):
-        return self.__bossac % (self.short_device_name, self.local_firmware)
+        cmd = 'bossac.exe -i -d --port=%s -U true -i -e -w -v %s -R' \
+            % (self.short_device_name, self.local_firmware)
+        return path(cmd, 'seeed/')
 
     @property
     def stty(self):
@@ -169,10 +166,8 @@ class LocalFileTree(QTreeWidget):
         self.setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.header().setVisible(False)
-        self.__icon_firmware = \
-            QIcon(os.path.join(Info.icon_path, 'firmware.png'))
-        self.__icon_folder = \
-            QIcon(os.path.join(Info.icon_path, 'folder.png'))
+        self.__icon_firmware = load_icon('firmware.png')
+        self.__icon_folder = load_icon('folder.png')
 
     def ls(self):
         self.clear()
