@@ -25,6 +25,7 @@ from PyQt5.QtCore import QDir
 # The following lines add the images and css directories to the search path.
 QDir.addSearchPath('images', resource_filename(__name__, 'images'))
 QDir.addSearchPath('css', resource_filename(__name__, 'css'))
+QDir.addSearchPath('seeed', resource_filename(__name__, 'seeed'))
 
 
 def path(name, resource_dir="images/"):

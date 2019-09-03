@@ -25,15 +25,18 @@ import os
 import subprocess
 import shutil
 from serial import Serial
+from mu.contrib.microfs import execute
 from mu.modes.api import SEEED_APIS, SHARED_APIS
 from mu.modes.base import MicroPythonMode, FileManager
-from mu.interface.panes import CHARTS, \
-    MicroPythonDeviceFileList, FileSystemPane
+from mu.interface.panes import CHARTS, PANE_ZOOM_SIZES, \
+    MicroPythonDeviceFileList, FileSystemPane, LocalFileList
+from mu.interface.themes import Font, DEFAULT_FONT_SIZE
 from mu.resources import load_icon, path
-from PyQt5.QtCore import pyqtSignal, QThread, Qt
 from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
+from PyQt5.QtCore import pyqtSignal, QThread, Qt, QObject
 from PyQt5.QtWidgets import QMessageBox, \
     QMenu, QTreeWidget, QTreeWidgetItem, QAbstractItemView
+from PyQt5.QtWidgets import QGridLayout, QLabel, QFrame
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +47,10 @@ class Info:
     board_normal = []
     board_boot = []
     dic_config = {}
+    com = None
     board_id = None
     board_name = None
-    info_path = path('info.json', 'pygamezero/seeed/')
+    info_path = path('info.json', 'seeed/')
 
     def __init__(self):
         file = open(Info.info_path, 'r')
@@ -70,13 +74,6 @@ class Info:
             Info.dic_config.setdefault(str(keyv), fmt % name)
             Info.board_normal.append(keyv)
 
-        if os.name == 'posix':
-            self.__stty = 'stty -F %s 1200'
-        elif os.name == 'nt':
-            self.__stty = 'MODE %s:BAUD=1200'
-        else:
-            raise NotImplementedError('not implement stty.')
-
     def load_config(self):
         file = open(self.config_path, 'r')
         self.__config = json.loads(file.read())
@@ -88,7 +85,7 @@ class Info:
 
     @property
     def config_path(self):
-        return path(self.dic_config[self.board_id], 'pygamezero/seeed/')
+        return path(self.dic_config[self.board_id], 'seeed/')
 
     @property
     def version(self):
@@ -100,7 +97,7 @@ class Info:
 
     @property
     def local_firmware(self):
-        return path(self.__config['firmware']['name'], 'pygamezero/seeed/')
+        return path(self.__config['firmware']['name'], 'seeed/')
 
     @property
     def firmware_name(self):
@@ -117,11 +114,15 @@ class Info:
     def bossac(self):
         cmd = 'bossac.exe -i -d --port=%s -U true -i -e -w -v %s -R' \
             % (self.short_device_name, self.local_firmware)
-        return path(cmd, 'pygamezero/seeed/')
+        return path(cmd, 'seeed/')
 
     @property
     def stty(self):
-        return self.__stty % self.board_name
+        if os.name == 'posix':
+            return 'stty -F ' + self.board_name + ' %d'
+        elif os.name == 'nt':
+            return 'MODE ' + self.board_name + ':BAUD=%d PARITY=N DATA=8'
+        return ['echo not support']
 
 
 class ConfirmFlag:
@@ -216,75 +217,143 @@ class LocalFileTree(QTreeWidget):
         self.list_files.emit()
 
 
-class ArdupyDeviceFileList(MicroPythonDeviceFileList):
-    info = None
+class SeeedFileSystemPane(QFrame):
+    set_message = pyqtSignal(str)
+    set_warning = pyqtSignal(str)
+    list_files = pyqtSignal()
+    open_file = pyqtSignal(str)
 
     def __init__(self, home):
-        super().__init__(home)
+        super().__init__()
+        self.home = home
+        self.font = Font().load()
+        microbit_fs = ArdupyDeviceFileList(home)
+        local_fs = LocalFileTree(home)
 
-    def dropEvent(self, event):
-        source = event.source()
-        item = source.currentItem()
+        @local_fs.open_file.connect
+        def on_open_file(file):
+            # Bubble the signal up
+            self.open_file.emit(file)
 
-        if not isinstance(source, LocalFileTree):
-            return
-        if not item.is_file:
-            msg = 'Not successfuly, current version just support copy file.'
-            logger.info(msg)
-            self.set_message.emit(msg)
-            return
+        layout = QGridLayout()
+        self.setLayout(layout)
+        microbit_label = QLabel()
+        microbit_label.setText(_('Files on your device:'))
+        local_label = QLabel()
+        local_label.setText(_('Files on your computer:'))
+        self.microbit_label = microbit_label
+        self.local_label = local_label
+        self.microbit_fs = microbit_fs
+        self.local_fs = local_fs
+        self.set_font_size()
+        layout.addWidget(microbit_label, 0, 0)
+        layout.addWidget(local_label, 0, 1)
+        layout.addWidget(microbit_fs, 1, 0)
+        layout.addWidget(local_fs, 1, 1)
+        self.microbit_fs.disable.connect(self.disable)
+        self.microbit_fs.set_message.connect(self.show_message)
+        self.local_fs.disable.connect(self.disable)
+        self.local_fs.set_message.connect(self.show_message)
 
-        name = item.name
-        path = os.path.join(item.dir, name)
+    def disable(self):
+        """
+        Stops interaction with the list widgets.
+        """
+        self.microbit_fs.setDisabled(True)
+        self.local_fs.setDisabled(True)
+        self.microbit_fs.setAcceptDrops(False)
+        self.local_fs.setAcceptDrops(False)
 
-        if not os.path.exists(path):
-            self.set_message.emit('Sorry, ' + name +
-                                  ' not exist in current folder, ' +
-                                  'place reopen file panel.')
-            return
+    def enable(self):
+        """
+        Allows interaction with the list widgets.
+        """
+        self.microbit_fs.setDisabled(False)
+        self.local_fs.setDisabled(False)
+        self.microbit_fs.setAcceptDrops(True)
+        self.local_fs.setAcceptDrops(True)
 
-        if self.findItems(name, Qt.MatchExactly) and \
-                not self.show_confirm_overwrite_dialog():
-            return
+    def show_message(self, message):
+        """
+        Emits the set_message signal.
+        """
+        self.set_message.emit(message)
 
-        self.com = Serial(self.info.board_name, 115200, timeout=1, parity='N')
-        if self.com.is_open is False:
-            self.com.open()
-        self.com.write(b'\x03')
-        self.com.write(b'\x02')
-        self.com.write(b"import os\r")
-        self.com.write(b"os.statvfs('/')\r")
+    def show_warning(self, message):
+        """
+        Emits the set_warning signal.
+        """
+        self.set_warning.emit(message)
 
-        while True:
-            try:
-                back = str(self.com.readline())
-                back.index("statvfs")
-                back = str(self.com.readline())
-                back = back.replace('\\r', '').replace('\\n', '')
-                back = back[3:len(back) - 2].split(', ')
-                break
-            except Exception as ex:
-                print(ex)
-                continue
+    def on_ls(self, microbit_files):
+        """
+        Displays a list of the files on the micro:bit.
 
-        avaliable_byte = int(back[1]) * int(back[4])
-        file_size = os.path.getsize(path)
+        Since listing files is always the final event in any interaction
+        between Mu and the micro:bit, this enables the controls again for
+        further interactions to take place.
+        """
+        self.microbit_fs.clear()
+        self.local_fs.clear()
+        for f in microbit_files:
+            self.microbit_fs.addItem(f)
 
-        if avaliable_byte > file_size:
-            msg = "Copying '%s' to seeed board." % name
-            self.disable.emit()
-            self.set_message.emit(msg)
-            self.put.emit(path)
-        else:
-            msg = "Fail! target device doesn't have enough space."
-            self.set_message.emit(msg)
-        logger.info(msg)
+        self.local_fs.ls()
+        self.enable()
 
+    def on_ls_fail(self):
+        """
+        Fired when listing files fails.
+        """
+        self.show_warning(_("There was a problem getting the list of files on "
+                            "the device. Please check Mu's logs for "
+                            "technical information. Alternatively, try "
+                            "unplugging/plugging-in your device and/or "
+                            "restarting Mu."))
+        self.disable()
 
-class SeeedFileSystemPane(FileSystemPane):
-    def __init__(self, home):
-        super().__init__(home)
-        self.microbit_fs = ArdupyDeviceFileList(home)
+    def on_put_fail(self, filename):
+        """
+        Fired when the referenced file cannot be copied onto the device.
+        """
+        self.show_warning(_("There was a problem copying the file '{}' onto "
+                            "the device. Please check Mu's logs for "
+                            "more information.").format(filename))
+
+    def on_delete_fail(self, filename):
+        """
+        Fired when a deletion on the device for the given file failed.
+        """
+        self.show_warning(_("There was a problem deleting '{}' from the "
+                            "device. Please check Mu's logs for "
+                            "more information.").format(filename))
+
+    def on_get_fail(self, filename):
+        """
+        Fired when getting the referenced file on the device failed.
+        """
+        self.show_warning(_("There was a problem getting '{}' from the "
+                            "device. Please check Mu's logs for "
+                            "more information.").format(filename))
+
+    def set_theme(self, theme):
+        pass
+
+    def set_font_size(self, new_size=DEFAULT_FONT_SIZE):
+        """
+        Sets the font size for all the textual elements in this pane.
+        """
+        self.font.setPointSize(new_size)
+        self.microbit_label.setFont(self.font)
+        self.local_label.setFont(self.font)
+        self.microbit_fs.setFont(self.font)
+        self.local_fs.setFont(self.font)
+
+    def set_zoom(self, size):
+        """
+        Set the current zoom level given the "t-shirt" size.
+        """
+        self.set_font_size(PANE_ZOOM_SIZES[size])
 
 
 def strptime(value):
@@ -309,6 +378,7 @@ class FirmwareUpdater(QThread):
     confirm = pyqtSignal(ConfirmFlag)
     flashing_result = pyqtSignal(str)
     detected = False
+    downloading = False
     need_confirm = True
     hint_flashing = 'Flashing...'
     hint_flashing_success = 'Flashing success.'
@@ -324,13 +394,19 @@ class FirmwareUpdater(QThread):
         while True:
             while not self.detected:
                 time.sleep(1)
+            print('open new com')
             self.info.board_name = self.info.new_board_name
             self.info.board_id = self.info.new_board_id
             self.detected = False
             self.update()
 
-    def go_download_mode(self):
-        os.system(self.info.stty)
+    def set_buad_rate(self, value):
+        self.downloading = True
+        v = self.info.stty % value
+        
+        print(v)
+        p = subprocess.Popen(v, shell=True, stdout=subprocess.PIPE)
+        return p.wait(30)
 
     def flashing(self):
         return 0 == os.system(self.info.bossac)
@@ -371,48 +447,32 @@ class FirmwareUpdater(QThread):
                 return
             print("finish download.")
 
-        def try_ask():
-            need_update = True
-            has_seeed_firmware = True
-            com = QSerialPort()
-            com.setPortName(self.info.board_name)
-            com.setBaudRate(115200)
+        need_update = True
+        has_seeed_firmware = True
+        com = QSerialPort()
+        com.setBaudRate(115200)
+        com.setPortName(self.info.new_board_name)
 
-            if com.open(QSerialPort.ReadWrite) is False:
-                print("can't open serial.")
-                return not need_update, not has_seeed_firmware
-
-            print('write 0x2 0x3')
-            end_token = '; Ardupy with seeed'
+        if com.open(QSerialPort.ReadWrite):
+            buf = bytearray()
             com.write(b'\x03')
-            ok = com.waitForBytesWritten(100)
+            com.write(b'\x03')
             com.write(b'\x02')
-            ok = ok and com.waitForBytesWritten(100)
-            print('finish write ', ok)
-
-            if not ok or not com.waitForReadyRead(100):
-                com.close()
-                print('close serial')
-                return need_update, not has_seeed_firmware
-
+            while com.waitForReadyRead(400) and len(buf) < 200:
+                buf = buf + com.readAll()
             try:
-                print('read')
-                tmp = com.read(100)
-                tmp = str(tmp, 'utf-8')
+                tmp = str(buf, 'utf-8')
                 print(tmp)
-                r = tmp.index(end_token)
+                r = tmp.index('; Ardupy with seeed')
                 tmp = tmp[r - 10:r]
                 need_update = new_version > strptime(tmp)
                 print(tmp)
             except Exception as ex:
                 print(ex)
                 has_seeed_firmware = False
-
             com.close()
-            print('close serial')
-            return need_update, has_seeed_firmware
-
-        need_update, has_seeed_firmware = try_ask()
+        else:
+            print("can't open com")
 
         if not need_update:
             return
@@ -432,23 +492,76 @@ class FirmwareUpdater(QThread):
             if flag.confirm is False:
                 return
 
-        self.go_download_mode()
+        self.show_status.emit(self.hint_flashing)
+        if self.set_buad_rate(1200):
+            self.show_status.emit(self.hint_flashing_fail)
+            return 
+        self.downloading = True
+        if self.flashing():
+            version = '%d.%d.%d' % \
+                (new_version.year, new_version.month, new_version.day)
+            self.flashing_result.emit(version)
+            return
+        self.flashing_result.emit(self.hint_flashing_fail)
 
-        for i in range(3):
-            '''
-            wait serial available
-            a dectect message will show in the message line after 1sec
-            so we also wait it show up and override it.
-            '''
-            time.sleep(1.2)
-            self.show_status.emit(self.hint_flashing)
+class ArdupyDeviceFileList(MicroPythonDeviceFileList):
+    info = None
+    serial = None
 
-            if self.flashing():
-                version = '%d.%d.%d' % \
-                    (new_version.year, new_version.month, new_version.day)
-                self.flashing_result.emit(version)
-                return
-        self.flashing_result.emit(None)
+    def __init__(self, home):
+        super().__init__(home)
+
+    def dropEvent(self, event):
+        source = event.source()
+        item = source.currentItem()
+
+        if not isinstance(source, LocalFileTree):
+            return
+        if not item.is_file:
+            msg = 'Not successfuly, current version just support copy file.'
+            logger.info(msg)
+            self.set_message.emit(msg)
+            return
+
+        name = item.name
+        path = os.path.join(item.dir, name)
+
+        if not os.path.exists(path):
+            self.set_message.emit('Sorry, ' + name +
+                                  ' not exist in current folder, ' +
+                                  'place reopen file panel.')
+            return
+
+        if self.findItems(name, Qt.MatchExactly) and \
+                not self.show_confirm_overwrite_dialog():
+            return
+
+        try:
+            msg = execute([
+                'import os',
+                'print(os.statvfs(\'/\'), end=\'\')',
+            ], ArdupyDeviceFileList.serial)
+            msg = str(msg[0], 'utf-8')
+            print(msg)
+        except Exception as ex:
+            print(ex)
+            msg = "Fail! serial error."
+            self.set_message.emit(msg)
+            return
+
+        val = msg.split(', ')
+        avaliable_byte = int(val[1]) * int(val[4])
+        file_size = os.path.getsize(path)
+
+        if avaliable_byte > file_size:
+            msg = "Copying '%s' to seeed board." % name
+            self.disable.emit()
+            self.set_message.emit(msg)
+            self.put.emit(path)
+        else:
+            msg = "Fail! target device doesn't have enough space."
+            self.set_message.emit(msg)
+        logger.info(msg)
 
 
 class SeeedMode(MicroPythonMode):
@@ -460,7 +573,6 @@ class SeeedMode(MicroPythonMode):
     description = _("Use MicroPython on Seeed's line of boards.")
     icon = 'seeed'
     fs = None
-    second_of_show = 4
     info = Info()
     # There are many boards which use ESP microcontrollers but they often use
     # the same USB / serial chips (which actually define the Vendor ID and
@@ -490,6 +602,9 @@ class SeeedMode(MicroPythonMode):
         if msg == self.invoke.hint_flashing_fail or \
                 msg == self.invoke.hint_flashing_success:
             self.__set_all_button(True)
+        elif msg == self.invoke.hint_flashing:
+            self.editor.show_status_message(msg, 20)
+            return
         self.editor.show_status_message(msg)
 
     def __confirm(self, flag):
@@ -511,6 +626,10 @@ class SeeedMode(MicroPythonMode):
         self.msg.show()
 
     def __asyc_detect_new_device_handle(self, device_name):
+        if self.invoke.downloading:
+            self.invoke.downloading = False
+            return
+
         self.invoke.need_confirm = True
         self.invoke.info.new_board_id = None
         self.invoke.info.new_board_name = device_name
@@ -545,7 +664,7 @@ class SeeedMode(MicroPythonMode):
         buttons = [
             {
                 'name': 'run',
-                'display_name': ('Run'),
+                'display_name': _('Run'),
                 'description': _("Run your code directly on the Seeed's"
                                  " line of boards. via the REPL."),
                 'handler': self.run,
@@ -553,7 +672,7 @@ class SeeedMode(MicroPythonMode):
             },
             {
                 'name': 'files',
-                'display_name': ('Files'),
+                'display_name': _('Files'),
                 'description': _("Access the file system on "
                                  "Seeed's line of boards."),
                 'handler': self.toggle_files,
@@ -561,7 +680,7 @@ class SeeedMode(MicroPythonMode):
             },
             {
                 'name': 'repl',
-                'display_name': ('REPL'),
+                'display_name': _('REPL'),
                 'description': _("Use the REPL to live-code on the "
                                  "Seeed's line of boards."),
                 'handler': self.toggle_repl,
@@ -570,12 +689,11 @@ class SeeedMode(MicroPythonMode):
         if CHARTS:
             buttons.append({
                 'name': 'plotter',
-                'display_name': ('Plotter'),
-                'description': ('Plot incoming REPL data.'),
+                'display_name': _('Plotter'),
+                'description': _('Plot incoming REPL data.'),
                 'handler': self.toggle_plotter,
                 'shortcut': 'CTRL+Shift+P',
             })
-
         return buttons
 
     def api(self):
@@ -671,11 +789,11 @@ class SeeedMode(MicroPythonMode):
             if self.fs is None:
                 self.add_fs()
                 if self.fs:
-                    logger.info('Toggle filesystem on.')
+                    #logger.info('Toggle filesystem on.')
                     self.set_buttons(run=False, repl=False, plotter=False)
             else:
                 self.remove_fs()
-                logger.info('Toggle filesystem off.')
+                #logger.info('Toggle filesystem off.')
                 self.set_buttons(run=True, repl=True, plotter=True)
 
     def add_fs(self):
@@ -698,15 +816,21 @@ class SeeedMode(MicroPythonMode):
                             "again.")
             self.view.show_message(message, information)
             return
+
+        def on_start():
+            self.file_manager.on_start()
+            try:
+                ArdupyDeviceFileList.serial = self.file_manager.serial
+            except Exception as ex:
+                print(ex)
+
         self.file_manager_thread = QThread(self)
         self.file_manager = FileManager(device_port)
         self.file_manager.moveToThread(self.file_manager_thread)
-        self.file_manager_thread.started.connect(self.file_manager.on_start)
-        self.fs = self.view.add_filesystem(
-            self.workspace_dir(),
-            self.file_manager,
-            _("Seeed's line of boards")
-        )
+        self.file_manager_thread.started.connect(on_start)
+        self.fs = self.view.add_filesystem(self.workspace_dir(),
+                                           self.file_manager,
+                                           _("Seeed's line of boards"))
         self.fs.set_message.connect(self.editor.show_status_message)
         self.fs.set_warning.connect(self.view.show_message)
         self.file_manager_thread.start()
@@ -719,6 +843,7 @@ class SeeedMode(MicroPythonMode):
         self.file_manager = None
         self.file_manager_thread = None
         self.fs = None
+        ArdupyDeviceFileList.serial = None
 
     def on_data_flood(self):
         """
