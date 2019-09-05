@@ -168,6 +168,7 @@ class LocalFileTree(QTreeWidget):
     disable = pyqtSignal()
     enable = pyqtSignal()
     need_update_tree = True
+    info = None
 
     def __build_list(self, control, parent_dir):
         for _, dirnames, filesnames in os.walk(parent_dir):
@@ -222,9 +223,22 @@ class LocalFileTree(QTreeWidget):
 
     def contextMenuEvent(self, event):
         cur = self.currentItem()
-        # while cur.parent() is not None:
-        #     cur = cur.parent()
-        # if cur.text() == :
+        if cur.is_file:
+            hint_cant_delete = _("This Libaray file can't be deleted.")
+        else:
+            hint_cant_delete = _("This Libaray folder can't be deleted.")
+        while cur.parent() is not None:
+            cur = cur.parent()
+        name = cur.text(0)
+
+        for item in LocalFileTree.info.lib_dic.keys():
+            if os.path.splitext(item)[0] != name:
+                continue
+            menu = QMenu(self)
+            delete_action = menu.addAction(hint_cant_delete)
+            menu.exec_(self.mapToGlobal(event.pos()))
+            return
+
         menu = QMenu(self)
         delete_action = menu.addAction(_("Delete (cannot be undone)"))
         action = menu.exec_(self.mapToGlobal(event.pos()))
@@ -759,6 +773,7 @@ class SeeedMode(MicroPythonMode):
         self.invoke.start()
         self.view.default_pane = SeeedFileSystemPane
         ArdupyDeviceFileList.info = SeeedMode.info
+        LocalFileTree.info = SeeedMode.info
         editor.detect_new_device_handle = \
             self.__asyc_detect_new_device_handle
 
