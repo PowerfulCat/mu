@@ -424,7 +424,6 @@ def download(des_path, source_path, timeout=5, try_time=3):
             return True
         except Exception as ex:
             print(ex)
-            os.remove(tmp)
     return False
 
 
