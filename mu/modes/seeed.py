@@ -24,16 +24,16 @@ import datetime
 import os
 import subprocess
 import shutil
-from serial import Serial
+import zipfile
 from mu.contrib.microfs import execute
 from mu.modes.api import SEEED_APIS, SHARED_APIS
 from mu.modes.base import MicroPythonMode, FileManager
 from mu.interface.panes import CHARTS, PANE_ZOOM_SIZES, \
-    MicroPythonDeviceFileList, FileSystemPane, LocalFileList
+    MicroPythonDeviceFileList
 from mu.interface.themes import Font, DEFAULT_FONT_SIZE
 from mu.resources import load_icon, path
 from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
-from PyQt5.QtCore import pyqtSignal, QThread, Qt, QObject
+from PyQt5.QtCore import pyqtSignal, QThread, Qt
 from PyQt5.QtWidgets import QMessageBox, \
     QMenu, QTreeWidget, QTreeWidgetItem, QAbstractItemView
 from PyQt5.QtWidgets import QGridLayout, QLabel, QFrame
@@ -50,33 +50,43 @@ class Info:
     com = None
     board_id = None
     board_name = None
-    info_path = path('info.json', 'seeed/')
 
     def __init__(self):
-        file = open(Info.info_path, 'r')
-        cfg = json.loads(file.read())
-        Info.board_boot.clear()
-        Info.board_normal.clear()
-        Info.dic_config.clear()
+        inf = open(self.info_path, 'r')
+        inf = json.loads(inf.read())
+        self.lib_dic = {}
+        self.board_boot.clear()
+        self.board_normal.clear()
+        self.dic_config.clear()
         fmt = 'config-%s.json'
 
-        for board in cfg['boot']:
+        for board in inf['boot']:
             name = board['name']
             pvid = board['pvid']
             keyv = (pvid[0], pvid[1])
-            Info.dic_config.setdefault(str(keyv), fmt % name)
-            Info.board_boot.append(keyv)
+            self.dic_config.setdefault(str(keyv), fmt % name)
+            self.board_boot.append(keyv)
 
-        for board in cfg['normal']:
+        for board in inf['normal']:
             name = board['name']
             pvid = board['pvid']
             keyv = (pvid[0], pvid[1])
-            Info.dic_config.setdefault(str(keyv), fmt % name)
-            Info.board_normal.append(keyv)
+            self.dic_config.setdefault(str(keyv), fmt % name)
+            self.board_normal.append(keyv)
+
+        inf = open(self.info_path, 'r')
+        inf = json.loads(inf.read())
+
+        for lib in inf['lib']:
+            self.lib_dic.setdefault(lib['name'], lib['version'])
 
     def load_config(self):
         file = open(self.config_path, 'r')
         self.__config = json.loads(file.read())
+
+    @staticmethod
+    def path(child):
+        return path(child, 'seeed/')
 
     @property
     def cloud_config_path(self):
@@ -84,8 +94,12 @@ class Info:
             self.dic_config[self.board_id]
 
     @property
+    def cloud_libaray_info_path(self):
+        return 'https://seeed-studio.github.io/ArduPy/libaray.json'
+
+    @property
     def config_path(self):
-        return path(self.dic_config[self.board_id], 'seeed/')
+        return self.path(self.dic_config[self.board_id])
 
     @property
     def version(self):
@@ -97,7 +111,7 @@ class Info:
 
     @property
     def local_firmware(self):
-        return path(self.__config['firmware']['name'], 'seeed/')
+        return self.path(self.__config['firmware']['name'])
 
     @property
     def firmware_name(self):
@@ -114,7 +128,7 @@ class Info:
     def bossac(self):
         cmd = 'bossac.exe -i -d --port=%s -U true -i -e -w -v %s -R' \
             % (self.short_device_name, self.local_firmware)
-        return path(cmd, 'seeed/')
+        return self.path(cmd)
 
     @property
     def stty(self):
@@ -124,10 +138,24 @@ class Info:
             return 'MODE ' + self.board_name + ':BAUD=%d PARITY=N DATA=8'
         return ['echo not support']
 
+    @property
+    def info_path(self):
+        return self.path('info.json')
+
+    @property
+    def libaray_info_path(self):
+        return self.path('libaray.json')
+
 
 class ConfirmFlag:
     hint = None
     confirm = None
+
+    @property
+    def is_confirm(self):
+        while self.confirm is None:
+            time.sleep(0.7)
+        return self.confirm
 
 
 class LocalFileTree(QTreeWidget):
@@ -138,6 +166,8 @@ class LocalFileTree(QTreeWidget):
     get = pyqtSignal(str, str)
     list_files = pyqtSignal()
     disable = pyqtSignal()
+    enable = pyqtSignal()
+    need_update_tree = True
 
     def __build_list(self, control, parent_dir):
         for _, dirnames, filesnames in os.walk(parent_dir):
@@ -171,7 +201,6 @@ class LocalFileTree(QTreeWidget):
         self.__icon_folder = load_icon('folder.png')
 
     def ls(self):
-        self.clear()
         self.__build_list(self, self.home)
 
     def on_get(self, ardupy_file):
@@ -192,6 +221,10 @@ class LocalFileTree(QTreeWidget):
         self.list_files.emit()
 
     def contextMenuEvent(self, event):
+        cur = self.currentItem()
+        # while cur.parent() is not None:
+        #     cur = cur.parent()
+        # if cur.text() == :
         menu = QMenu(self)
         delete_action = menu.addAction(_("Delete (cannot be undone)"))
         action = menu.exec_(self.mapToGlobal(event.pos()))
@@ -205,16 +238,12 @@ class LocalFileTree(QTreeWidget):
                 os.remove(path)
             else:
                 shutil.rmtree(path)
-            self.on_delete(item.name)
-
-    def on_delete(self, ardupy_file):
-        """
-        Fired when the delete event is completed for the given filename.
-        """
-        msg = "'%s' successfully deleted from ardupy." % ardupy_file
-        logger.info(msg)
-        self.set_message.emit(msg)
-        self.list_files.emit()
+            parent = item.parent() or self.invisibleRootItem()
+            parent.removeChild(item)
+            msg = "'%s' successfully deleted from local machine." % item.name
+            logger.info(msg)
+            self.set_message.emit(msg)
+            self.enable.emit()
 
 
 class SeeedFileSystemPane(QFrame):
@@ -253,6 +282,7 @@ class SeeedFileSystemPane(QFrame):
         self.microbit_fs.disable.connect(self.disable)
         self.microbit_fs.set_message.connect(self.show_message)
         self.local_fs.disable.connect(self.disable)
+        self.local_fs.enable.connect(self.enable)
         self.local_fs.set_message.connect(self.show_message)
 
     def disable(self):
@@ -294,11 +324,14 @@ class SeeedFileSystemPane(QFrame):
         further interactions to take place.
         """
         self.microbit_fs.clear()
-        self.local_fs.clear()
         for f in microbit_files:
             self.microbit_fs.addItem(f)
 
-        self.local_fs.ls()
+        if self.local_fs.need_update_tree:
+            self.local_fs.clear()
+            self.local_fs.ls()
+        else:
+            self.local_fs.need_update_tree = True
         self.enable()
 
     def on_ls_fail(self):
@@ -361,55 +394,150 @@ def strptime(value):
 
 
 def download(des_path, source_path, timeout=5, try_time=3):
+    parent_dir = os.path.dirname(des_path)
+    tmp = des_path + '.tmp'
+    for _, _, filesnames in os.walk(parent_dir):
+        for f in filesnames:
+            if f.endswith('.tmp'):
+                os.remove(os.path.join(parent_dir, f))
+        break
+
     for i in range(0, try_time):
         try:
-            if os.path.exists(des_path):
-                os.remove(des_path)
-            wget.download(source_path, des_path)
+            wget.download(source_path, tmp)
+            shutil.move(tmp, des_path)
             print("finish download.")
             return True
-        except subprocess.TimeoutExpired:
-            print('download timeout.')
+        except Exception as ex:
+            print(ex)
+            os.remove(tmp)
     return False
 
 
 class FirmwareUpdater(QThread):
-    show_status = pyqtSignal(str)
+    show_status = pyqtSignal(str, float)
     confirm = pyqtSignal(ConfirmFlag)
-    flashing_result = pyqtSignal(str)
+    show_message_box = pyqtSignal(str)
+    set_all_button = pyqtSignal(bool)
     detected = False
-    downloading = False
+    in_bootload_mode = False
     need_confirm = True
     hint_flashing = 'Flashing...'
     hint_flashing_success = 'Flashing success.'
     hint_flashing_fail = 'Flashing fail.'
 
-    def __init__(self, confirm, show_status, flashing_result, parent=None):
+    def __init__(
+            self,
+            mu_code_path,
+            confirm,
+            show_status,
+            show_message_box,
+            set_all_button,
+            parent=None):
         super(FirmwareUpdater, self).__init__(parent)
+        self.mu_code_path = mu_code_path
         self.confirm.connect(confirm)
         self.show_status.connect(show_status)
-        self.flashing_result.connect(flashing_result)
+        self.show_message_box.connect(show_message_box)
+        self.set_all_button.connect(set_all_button)
 
     def run(self):
+        self.update_lib()
         while True:
             while not self.detected:
                 time.sleep(1)
-            print('open new com')
-            self.info.board_name = self.info.new_board_name
-            self.info.board_id = self.info.new_board_id
-            self.detected = False
             self.update()
+            self.detected = False
 
-    def set_buad_rate(self, value):
-        self.downloading = True
-        v = self.info.stty % value
-        
-        print(v)
-        p = subprocess.Popen(v, shell=True, stdout=subprocess.PIPE)
-        return p.wait(30)
+    def show_status_short_time(self, msg):
+        self.show_status.emit(msg, 5)
+
+    def show_status_always(self, msg):
+        self.show_status.emit(msg, 1000 * 1000)
+
+    def update_lib(self):
+        self.extract()
+        if not download(self.info.libaray_info_path,
+                        self.info.cloud_libaray_info_path):
+            print('network error')
+            return
+
+        lib = open(self.info.libaray_info_path, 'r')
+        inf = open(self.info.info_path, 'r')
+        lib = json.loads(lib.read())
+        inf = json.loads(inf.read())
+        network_error = 'libaray update failure, please check your network.'
+        has_new = False
+
+        # check new
+        for new in lib:
+            need_download = True
+            new_nam = new['name']
+            new_ver = new['version']
+
+            if new_nam not in self.info.lib_dic.keys():
+                self.show_status_always('downloading %s...' % new_nam)
+            elif strptime(new_ver) > strptime(self.info.lib_dic[new_nam]):
+                self.show_status_always('updating %s...' % new_nam)
+            else:
+                need_download = False
+            if not need_download:
+                continue
+            if not download(self.info.path(new_nam), new['path'], timeout=16):
+                self.show_status_short_time(network_error)
+                return
+
+            self.show_status_always('extracting %s...' % new_nam)
+
+            if not self.unzip(new_nam):
+                self.show_status_short_time('%s extract failure' % new_nam)
+                return
+            has_new = True
+
+        if not has_new:
+            return
+
+        inf['lib'] = lib
+
+        with open(self.info.info_path, 'w') as f:
+            json.dump(inf, f)
+            print('lib has been updated successfully!')
+        self.show_status_short_time('libaray update successfully!')
+
+    def extract(self):
+        # extract to mu_code dir
+        inf = open(self.info.info_path, 'r')
+        inf = json.loads(inf.read())
+        for lib in inf['lib']:
+            self.unzip(lib['name'])
+
+    def unzip(self, lib_zip_name):
+        lib_path_zip = self.info.path(lib_zip_name)
+        lib_path_mu_code = os.path.join(
+            self.mu_code_path,
+            lib_zip_name.replace('.zip', '')
+        )
+
+        print('mu_code =', lib_path_mu_code)
+        print('lib_path_zip =', lib_path_zip)
+
+        try:
+            if not os.path.exists(lib_path_mu_code):
+                zf = zipfile.ZipFile(lib_path_zip, 'r')
+                for f in zf.namelist():
+                    zf.extract(f, lib_path_mu_code)
+                print('unzip circuitpython-bundle to mu_code dir')
+            return True
+        except Exception as ex:
+            if os.path.exists(lib_path_mu_code):
+                shutil.rmtree(lib_path_mu_code)
+            print(ex)
+            return False
 
     def flashing(self):
-        return 0 == os.system(self.info.bossac)
+        sp = subprocess.Popen(self.info.bossac, shell=True)
+        sp.wait()
+        return sp.returncode == 0
 
     def on_put(self, file):
         msg = "'%s' successfully copied to seeed board." % file
@@ -421,39 +549,97 @@ class FirmwareUpdater(QThread):
         self.set_message.emit(msg)
         self.list_files.emit()
 
-    def update(self):
-        print("download config.")
-        if os.path.exists(self.info.config_path):
-            self.info.load_config()
-            old_version = self.info.version
-        else:
-            old_version = datetime.datetime(2000, 1, 1)
+    def download_to_board(
+            self,
+            new_version,
+            need_update=True,
+            has_seeed_firmware=False):
+        if self.need_confirm:
+            flag = ConfirmFlag()
+            if has_seeed_firmware:
+                flag.hint = 'there is a new available firmware, ' + \
+                    'would you like to update it to you board ?'
+            elif self.in_bootload_mode:
+                flag.hint = 'your board on bootload download mode, ' + \
+                    'would you like to flashing a firmware ?'
+            else:
+                flag.hint = 'there is no firmware in your board, ' + \
+                    'would you like to flashing a firmware ?'
+            self.confirm.emit(flag)
 
-        if not download(self.info.config_path, self.info.cloud_config_path):
-            return None
-
-        self.info.load_config()
-        new_version = self.info.version
-
-        if old_version < new_version or \
-                not os.path.exists(self.info.local_firmware):
-            print("download firmware.")
-            success = download(
-                self.info.local_firmware,
-                self.info.cloud_firmware,
-                timeout=16
-            )
-            if not success:
+            if not flag.is_confirm:
                 return
-            print("finish download.")
+        elif not self.in_bootload_mode:
+            self.set_all_button.emit(True)
+            return
+        else:
+            self.need_confirm = True
 
+        self.set_all_button.emit(False)
+
+        if not self.in_bootload_mode:
+            print('setting buad rate...')
+            subprocess.call(self.info.stty % 1200, shell=True)
+            self.need_confirm = False
+            return
+
+        self.show_status_always(self.hint_flashing)
+        if self.flashing():
+            version = 'your board update to version %d.%d.%d sucessfully!' % \
+                (new_version.year, new_version.month, new_version.day)
+            self.show_message_box.emit(version)
+            self.show_status_short_time(self.hint_flashing_success)
+        else:
+            self.show_status_short_time(self.hint_flashing_fail)
+            self.show_status_short_time('flashing fail.')
+        self.set_all_button.emit(True)
+
+    def update(self):
         need_update = True
         has_seeed_firmware = True
-        com = QSerialPort()
-        com.setBaudRate(115200)
-        com.setPortName(self.info.new_board_name)
 
-        if com.open(QSerialPort.ReadWrite):
+        if self.need_confirm:
+            print("download config.")
+            if os.path.exists(self.info.config_path):
+                self.info.load_config()
+                old_version = self.info.version
+            else:
+                old_version = datetime.datetime(2000, 1, 1)
+
+            if not download(self.info.config_path,
+                            self.info.cloud_config_path):
+                return None
+
+            self.info.load_config()
+            new_version = self.info.version
+
+            if old_version < new_version and \
+                    not os.path.exists(self.info.local_firmware):
+                print("download firmware.")
+                success = download(
+                    self.info.local_firmware,
+                    self.info.cloud_firmware,
+                    timeout=16
+                )
+                if not success:
+                    return
+                print("finish download.")
+        else:
+            self.info.load_config()
+            new_version = self.info.version
+
+        if self.in_bootload_mode:
+            self.download_to_board(new_version)
+            return
+
+        for i in range(3):
+            com = QSerialPort()
+            com.setBaudRate(115200)
+            com.setPortName(self.info.board_name)
+            if not com.open(QSerialPort.ReadWrite):
+                print("can't open com, waiting...")
+                time.sleep(5)
+                continue
             buf = bytearray()
             com.write(b'\x03')
             com.write(b'\x03')
@@ -470,39 +656,18 @@ class FirmwareUpdater(QThread):
             except Exception as ex:
                 print(ex)
                 has_seeed_firmware = False
-            com.close()
-        else:
-            print("can't open com")
-
-        if not need_update:
-            return
-
-        if self.need_confirm:
-            flag = ConfirmFlag()
-            if has_seeed_firmware:
-                flag.hint = 'there is a new available firmware, ' + \
-                    'would you like to update it to you board ?'
+            if com.isOpen():
+                com.close()
+            if not need_update:
+                print('has latest firmware.')
             else:
-                flag.hint = 'there is no firmware in your board, ' + \
-                    'would you like to flashing a firmware ?'
-            self.confirm.emit(flag)
-
-            while flag.confirm is None:
-                time.sleep(0.7)
-            if flag.confirm is False:
-                return
-
-        self.show_status.emit(self.hint_flashing)
-        if self.set_buad_rate(1200):
-            self.show_status.emit(self.hint_flashing_fail)
-            return 
-        self.downloading = True
-        if self.flashing():
-            version = '%d.%d.%d' % \
-                (new_version.year, new_version.month, new_version.day)
-            self.flashing_result.emit(version)
+                self.download_to_board(
+                    new_version,
+                    need_update,
+                    has_seeed_firmware)
             return
-        self.flashing_result.emit(self.hint_flashing_fail)
+        print("giveup")
+
 
 class ArdupyDeviceFileList(MicroPythonDeviceFileList):
     info = None
@@ -522,7 +687,7 @@ class ArdupyDeviceFileList(MicroPythonDeviceFileList):
             logger.info(msg)
             self.set_message.emit(msg)
             return
-
+        source.need_update_tree = False
         name = item.name
         path = os.path.join(item.dir, name)
 
@@ -584,9 +749,11 @@ class SeeedMode(MicroPythonMode):
     def __init__(self, editor, view):
         super().__init__(editor, view)
         self.invoke = FirmwareUpdater(
+            mu_code_path=super().workspace_dir(),  # mu_code/
             confirm=self.__confirm,
-            show_status=self.__show_status,
-            flashing_result=self.__flashing_result
+            show_status=self.editor.show_status_message,
+            show_message_box=self.__show_message_box,
+            set_all_button=self.__set_all_button
         )
         self.invoke.info = SeeedMode.info
         self.invoke.start()
@@ -596,49 +763,29 @@ class SeeedMode(MicroPythonMode):
             self.__asyc_detect_new_device_handle
 
     def __set_all_button(self, state):
+        print('button Enable=' + str(state))
         self.set_buttons(files=state, run=state, repl=state, plotter=state)
-
-    def __show_status(self, msg):
-        if msg == self.invoke.hint_flashing_fail or \
-                msg == self.invoke.hint_flashing_success:
-            self.__set_all_button(True)
-        elif msg == self.invoke.hint_flashing:
-            self.editor.show_status_message(msg, 20)
-            return
-        self.editor.show_status_message(msg)
 
     def __confirm(self, flag):
         flag.confirm = QMessageBox.Ok == \
             self.view.show_confirmation(flag.hint, icon='Question')
-        if flag.confirm:
-            self.__set_all_button(False)
 
-    def __flashing_result(self, version):
+    def __show_message_box(self, text):
         self.msg = QMessageBox()
         self.msg.setWindowTitle('Hint')
         self.msg.setDefaultButton(self.msg.Ok)
-
-        if version:
-            self.msg.setText('your board update to version ' + version +
-                             ' successfully!')
-        else:
-            self.msg.setText('there is something wrong, update fail!')
+        self.msg.setText(text)
         self.msg.show()
 
     def __asyc_detect_new_device_handle(self, device_name):
-        if self.invoke.downloading:
-            self.invoke.downloading = False
-            return
-
-        self.invoke.need_confirm = True
-        self.invoke.info.new_board_id = None
-        self.invoke.info.new_board_name = device_name
+        self.info.board_id = None
+        self.info.board_name = device_name
         available_ports = QSerialPortInfo.availablePorts()
 
         def match(pvid, ids):
             for valid in ids:
                 if pvid == valid:
-                    self.invoke.info.new_board_id = str(valid)
+                    self.info.board_id = str(valid)
                     return True
             return False
 
@@ -647,14 +794,16 @@ class SeeedMode(MicroPythonMode):
                 port.vendorIdentifier(),
                 port.productIdentifier()
             )
-            if match(pvid, self.invoke.info.board_normal):
+            if match(pvid, self.info.board_normal):
+                self.invoke.in_bootload_mode = False
+                print('detect a normal mode borad')
                 break
-            if match(pvid, self.invoke.info.board_boot):
-                self.invoke.need_confirm = False
+            if match(pvid, self.info.board_boot):
+                self.invoke.in_bootload_mode = True
+                print('detect a bootload mode borad')
                 break
 
-        if self.invoke.info.new_board_id is not None:
-            self.invoke.detected = True
+        self.invoke.detected = True
 
     def actions(self):
         """
@@ -789,11 +938,11 @@ class SeeedMode(MicroPythonMode):
             if self.fs is None:
                 self.add_fs()
                 if self.fs:
-                    #logger.info('Toggle filesystem on.')
+                    logger.info('Toggle filesystem on.')
                     self.set_buttons(run=False, repl=False, plotter=False)
             else:
                 self.remove_fs()
-                #logger.info('Toggle filesystem off.')
+                logger.info('Toggle filesystem off.')
                 self.set_buttons(run=True, repl=True, plotter=True)
 
     def add_fs(self):
