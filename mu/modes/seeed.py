@@ -31,7 +31,7 @@ from mu.modes.base import MicroPythonMode, FileManager
 from mu.interface.panes import CHARTS, PANE_ZOOM_SIZES, \
     MicroPythonDeviceFileList
 from mu.interface.themes import Font, DEFAULT_FONT_SIZE
-from mu.resources import load_icon
+from mu.resources import load_icon, path
 from PyQt5.QtSerialPort import QSerialPort, QSerialPortInfo
 from PyQt5.QtCore import pyqtSignal, QThread, Qt
 from PyQt5.QtWidgets import QMessageBox, \
@@ -86,7 +86,7 @@ class Info:
 
     @staticmethod
     def path(child):
-        return os.path.join('resources', 'seeed', child)
+        return path(child, 'seeed/')
 
     @property
     def cloud_config_path(self):
