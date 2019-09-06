@@ -86,7 +86,7 @@ class Info:
 
     @staticmethod
     def path(child):
-        return os.path.join(os.getcwd(), 'resources', 'seeed', child)
+        return os.path.join('resources', 'seeed', child)
 
     @property
     def cloud_config_path(self):
