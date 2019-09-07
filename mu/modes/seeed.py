@@ -91,9 +91,9 @@ class Info:
     @staticmethod
     def path_tools(child):
         if os.name == 'posix':
-            return path(child, 'tools-posix/')
+            return path(child, 'seeed/tools-posix/')
         else:
-            return path(child, 'tools-win/')
+            return path(child, 'seeed/tools-win/')
 
     @property
     def cloud_config_path(self):
