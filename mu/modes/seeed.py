@@ -88,6 +88,13 @@ class Info:
     def path(child):
         return path(child, 'seeed/')
 
+    @staticmethod
+    def path_tools(child):
+        if os.name == 'posix':
+            return path(child, 'tools-posix/')
+        else:
+            return path(child, 'tools-win/')
+
     @property
     def cloud_config_path(self):
         return 'https://seeed-studio.github.io/ArduPy/' + \
@@ -126,13 +133,11 @@ class Info:
 
     @property
     def bossac(self):
-        if os.name == 'posix':
-            tool = os.path.join('tools-posix', 'bossac')
-        else:
-            tool = os.path.join('tools-win', 'bossac.exe')
-        cmd = '%s -i -d --port=%s -U true -i -e -w -v %s -R' \
-            % (tool, self.short_device_name, self.local_firmware)
-        return self.path(cmd)
+        cmd = 'bossac.exe -i -d --port=%s -U true -i -e -w -v %s -R' \
+            % (self.short_device_name, self.local_firmware)
+        cmd = self.path_tools(cmd)
+        print(cmd)
+        return cmd
 
     @property
     def stty(self):
