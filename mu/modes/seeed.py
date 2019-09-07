@@ -19,12 +19,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import logging
 import time
 import json
-import wget
 import datetime
 import os
 import subprocess
 import shutil
 import zipfile
+import requests
 from mu.contrib.microfs import execute
 from mu.modes.api import SEEED_APIS, SHARED_APIS
 from mu.modes.base import MicroPythonMode, FileManager
@@ -126,8 +126,12 @@ class Info:
 
     @property
     def bossac(self):
-        cmd = 'bossac.exe -i -d --port=%s -U true -i -e -w -v %s -R' \
-            % (self.short_device_name, self.local_firmware)
+        if os.name == 'posix':
+            tool = os.path.join('tools-posix', 'bossac')
+        else:
+            tool = os.path.join('tools-win', 'bossac.exe')
+        cmd = '%s -i -d --port=%s -U true -i -e -w -v %s -R' \
+            % (tool, self.short_device_name, self.local_firmware)
         return self.path(cmd)
 
     @property
@@ -410,15 +414,22 @@ def strptime(value):
 def download(des_path, source_path, timeout=5, try_time=3):
     parent_dir = os.path.dirname(des_path)
     tmp = des_path + '.tmp'
-    for _, _, filesnames in os.walk(parent_dir):
-        for f in filesnames:
-            if f.endswith('.tmp'):
-                os.remove(os.path.join(parent_dir, f))
-        break
 
     for i in range(0, try_time):
         try:
-            wget.download(source_path, tmp)
+            for _, _, filesnames in os.walk(parent_dir):
+                for f in filesnames:
+                    if f == tmp:
+                        os.remove(os.path.join(parent_dir, f))
+                        break
+                break
+
+            get = requests.get(source_path)
+            get.raise_for_status()
+            file = open(tmp, 'wb')
+            for block in get.iter_content(16 * 1024):
+                file.write(block)
+            file.close()
             shutil.move(tmp, des_path)
             print("finish download.")
             return True
