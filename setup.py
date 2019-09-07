@@ -2,6 +2,27 @@ import os
 import re
 from setuptools import setup
 
+seeed = 'include mu/resources/seeed/'
+tools_posix = seeed + 'tools-posix/*\n'
+tools_win = seeed + 'tools-win/*\n'
+file = open('MANIFEST.in', 'r')
+lines = file.readlines()
+file.close()
+file = open('MANIFEST.in', 'w')
+result = []
+for line in lines:
+    if tools_posix == line or tools_win == line:
+        continue
+    result.append(line)
+
+if os.name == 'posix':
+    result.append(tools_posix)
+elif os.name == 'nt':
+    result.append(tools_win)
+else:
+    raise NotImplementedError()
+file.writelines(result)
+file.close()
 
 base_dir = os.path.dirname(__file__)
 

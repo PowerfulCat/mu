@@ -10,3 +10,4 @@ include mu/resources/pygamezero/*
 include mu/resources/seeed/*
 include run.py
 recursive-include mu/locale *
+include mu/resources/seeed/tools-win/*
