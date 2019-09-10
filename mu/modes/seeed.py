@@ -273,6 +273,66 @@ class LocalFileTree(QTreeWidget):
             self.enable.emit()
 
 
+class ArdupyDeviceFileList(MicroPythonDeviceFileList):
+    info = None
+    serial = None
+
+    def __init__(self, home):
+        super().__init__(home)
+
+    def dropEvent(self, event):
+        source = event.source()
+        item = source.currentItem()
+
+        if not isinstance(source, LocalFileTree):
+            return
+        if not item.is_file:
+            msg = 'Not successfuly, current version just support copy file.'
+            logger.info(msg)
+            self.set_message.emit(msg)
+            return
+        source.need_update_tree = False
+        name = item.name
+        path = os.path.join(item.dir, name)
+
+        if not os.path.exists(path):
+            self.set_message.emit('Sorry, ' + name +
+                                  ' not exist in current folder, ' +
+                                  'place reopen file panel.')
+            return
+
+        if self.findItems(name, Qt.MatchExactly) and \
+                not self.show_confirm_overwrite_dialog():
+            return
+
+        try:
+            msg = execute([
+                'import os',
+                'print(os.statvfs(\'/\'), end=\'\')',
+            ], ArdupyDeviceFileList.serial)
+            msg = str(msg[0], 'utf-8')
+            print(msg)
+        except Exception as ex:
+            print(ex)
+            msg = "Fail! serial error."
+            self.set_message.emit(msg)
+            return
+
+        val = msg.split(', ')
+        avaliable_byte = int(val[1]) * int(val[4])
+        file_size = os.path.getsize(path)
+
+        if avaliable_byte > file_size:
+            msg = "Copying '%s' to seeed board." % name
+            self.disable.emit()
+            self.set_message.emit(msg)
+            self.put.emit(path)
+        else:
+            msg = "Fail! target device doesn't have enough space."
+            self.set_message.emit(msg)
+        logger.info(msg)
+
+
 class SeeedFileSystemPane(QFrame):
     set_message = pyqtSignal(str)
     set_warning = pyqtSignal(str)
@@ -344,10 +404,10 @@ class SeeedFileSystemPane(QFrame):
 
     def on_ls(self, microbit_files):
         """
-        Displays a list of the files on the micro:bit.
+        Displays a list of the files on the seeed board.
 
         Since listing files is always the final event in any interaction
-        between Mu and the micro:bit, this enables the controls again for
+        between Mu and the seeed board, this enables the controls again for
         further interactions to take place.
         """
         self.microbit_fs.clear()
@@ -537,7 +597,6 @@ class FirmwareUpdater(QThread):
         inf = json.loads(inf.read())
         for lib in inf['lib']:
             self.unzip(lib['name'])
-            print('unzip %s' % lib['name'])
 
     def unzip(self, lib_zip_name):
         lib_path_zip = self.info.path(lib_zip_name)
@@ -573,7 +632,7 @@ class FirmwareUpdater(QThread):
         self.list_files.emit()
 
     def on_delete(self, file):
-        msg = "'%s' successfully deleted from micro:bit." % file
+        msg = "'%s' successfully deleted from seeed board." % file
         self.set_message.emit(msg)
         self.list_files.emit()
 
@@ -606,7 +665,7 @@ class FirmwareUpdater(QThread):
         self.set_all_button.emit(False)
 
         if not self.in_bootload_mode:
-            print('setting buad rate...')
+            print('setting baud rate...')
             subprocess.call(self.info.stty % 1200, shell=True)
             self.need_confirm = False
             return
@@ -635,24 +694,25 @@ class FirmwareUpdater(QThread):
             else:
                 old_version = datetime.datetime(2000, 1, 1)
 
-            if not download(self.info.config_path,
-                            self.info.cloud_config_path):
-                return None
+            if download(self.info.config_path,
+                        self.info.cloud_config_path):
+                self.info.load_config()
+                new_version = self.info.version
 
-            self.info.load_config()
-            new_version = self.info.version
-
-            if old_version < new_version and \
-                    not os.path.exists(self.info.local_firmware):
-                print("download firmware.")
-                success = download(
-                    self.info.local_firmware,
-                    self.info.cloud_firmware,
-                    timeout=16
-                )
-                if not success:
-                    return
-                print("finish download.")
+                if old_version < new_version and \
+                        not os.path.exists(self.info.local_firmware):
+                    print("download firmware.")
+                    success = download(
+                        self.info.local_firmware,
+                        self.info.cloud_firmware,
+                        timeout=16
+                    )
+                    if not success:
+                        print("download failure.")
+                    else:
+                        print("finish download.")
+            else:
+                new_version = old_version
         else:
             self.info.load_config()
             new_version = self.info.version
@@ -661,7 +721,6 @@ class FirmwareUpdater(QThread):
             self.download_to_board(new_version)
             return
 
-        self.info.has_firmware = False
         for i in range(3):
             com = QSerialPort()
             com.setBaudRate(115200)
@@ -680,9 +739,9 @@ class FirmwareUpdater(QThread):
                 tmp = str(buf, 'utf-8')
                 print(tmp)
                 r = tmp.index('; Ardupy with seeed')
-                tmp = tmp[r - 10:r]
-                need_update = new_version > strptime(tmp)
-                print(tmp)
+                ver = tmp[r - 10:r]
+                need_update = new_version > strptime(ver)
+                print(ver)
                 self.info.has_firmware = True
             except Exception as ex:
                 print(ex)
@@ -699,66 +758,6 @@ class FirmwareUpdater(QThread):
                     has_seeed_firmware)
             return
         print("giveup")
-
-
-class ArdupyDeviceFileList(MicroPythonDeviceFileList):
-    info = None
-    serial = None
-
-    def __init__(self, home):
-        super().__init__(home)
-
-    def dropEvent(self, event):
-        source = event.source()
-        item = source.currentItem()
-
-        if not isinstance(source, LocalFileTree):
-            return
-        if not item.is_file:
-            msg = 'Not successfuly, current version just support copy file.'
-            logger.info(msg)
-            self.set_message.emit(msg)
-            return
-        source.need_update_tree = False
-        name = item.name
-        path = os.path.join(item.dir, name)
-
-        if not os.path.exists(path):
-            self.set_message.emit('Sorry, ' + name +
-                                  ' not exist in current folder, ' +
-                                  'place reopen file panel.')
-            return
-
-        if self.findItems(name, Qt.MatchExactly) and \
-                not self.show_confirm_overwrite_dialog():
-            return
-
-        try:
-            msg = execute([
-                'import os',
-                'print(os.statvfs(\'/\'), end=\'\')',
-            ], ArdupyDeviceFileList.serial)
-            msg = str(msg[0], 'utf-8')
-            print(msg)
-        except Exception as ex:
-            print(ex)
-            msg = "Fail! serial error."
-            self.set_message.emit(msg)
-            return
-
-        val = msg.split(', ')
-        avaliable_byte = int(val[1]) * int(val[4])
-        file_size = os.path.getsize(path)
-
-        if avaliable_byte > file_size:
-            msg = "Copying '%s' to seeed board." % name
-            self.disable.emit()
-            self.set_message.emit(msg)
-            self.put.emit(path)
-        else:
-            msg = "Fail! target device doesn't have enough space."
-            self.set_message.emit(msg)
-        logger.info(msg)
 
 
 class SeeedMode(MicroPythonMode):
@@ -811,6 +810,7 @@ class SeeedMode(MicroPythonMode):
         self.msg.show()
 
     def __asyc_detect_new_device_handle(self, device_name):
+        self.info.has_firmware = False
         self.info.board_id = None
         self.info.board_name = device_name
         available_ports = QSerialPortInfo.availablePorts()
@@ -886,8 +886,8 @@ class SeeedMode(MicroPythonMode):
         return SHARED_APIS + SEEED_APIS
 
     def check_firmware_existence(self):
-        hint = 'denit! please make sure there is a Ardupy firmware' + \
-            ' in your board.'
+        hint = 'denit! please make sure your board connected to ' + \
+            'the computer and there is a Ardupy firmware in your board.'
         if self.info.has_firmware:
             return True
         self.__show_message_box(hint)

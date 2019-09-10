@@ -20,4 +20,3 @@ if os.name == 'posix':
 elif os.name == 'nt':
     file.write('include mu/resources/seeed/tools-win/*\n' + inc)
 file.close()
-os.system('python setup.py ' + sys.argv[1])
