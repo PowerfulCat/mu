@@ -21,6 +21,7 @@ import time
 import json
 import datetime
 import os
+import platform
 import subprocess
 import shutil
 import zipfile
@@ -44,6 +45,7 @@ logger = logging.getLogger(__name__)
 class Info:
     __stty = None
     __config = None
+    has_firmware = False
     board_normal = []
     board_boot = []
     dic_config = {}
@@ -142,6 +144,8 @@ class Info:
     @property
     def stty(self):
         if os.name == 'posix':
+            if platform.uname().system == 'Darwin':
+                return 'stty -f ' + self.board_name + ' %d'
             return 'stty -F ' + self.board_name + ' %d'
         elif os.name == 'nt':
             return 'MODE ' + self.board_name + ':BAUD=%d PARITY=N DATA=8'
@@ -417,18 +421,12 @@ def strptime(value):
 
 
 def download(des_path, source_path, timeout=5, try_time=3):
-    parent_dir = os.path.dirname(des_path)
     tmp = des_path + '.tmp'
 
     for i in range(0, try_time):
         try:
-            for _, _, filesnames in os.walk(parent_dir):
-                for f in filesnames:
-                    if f == tmp:
-                        os.remove(os.path.join(parent_dir, f))
-                        break
-                break
-
+            if os.path.exists(tmp):
+                os.remove(tmp)
             get = requests.get(source_path)
             get.raise_for_status()
             file = open(tmp, 'wb')
@@ -539,6 +537,7 @@ class FirmwareUpdater(QThread):
         inf = json.loads(inf.read())
         for lib in inf['lib']:
             self.unzip(lib['name'])
+            print('unzip %s' % lib['name'])
 
     def unzip(self, lib_zip_name):
         lib_path_zip = self.info.path(lib_zip_name)
@@ -618,6 +617,7 @@ class FirmwareUpdater(QThread):
                 (new_version.year, new_version.month, new_version.day)
             self.show_message_box.emit(version)
             self.show_status_short_time(self.hint_flashing_success)
+            self.has_firmware = True
         else:
             self.show_status_short_time(self.hint_flashing_fail)
             self.show_status_short_time('flashing fail.')
@@ -661,6 +661,7 @@ class FirmwareUpdater(QThread):
             self.download_to_board(new_version)
             return
 
+        self.info.has_firmware = False
         for i in range(3):
             com = QSerialPort()
             com.setBaudRate(115200)
@@ -682,11 +683,13 @@ class FirmwareUpdater(QThread):
                 tmp = tmp[r - 10:r]
                 need_update = new_version > strptime(tmp)
                 print(tmp)
+                self.info.has_firmware = True
             except Exception as ex:
                 print(ex)
                 has_seeed_firmware = False
             if com.isOpen():
                 com.close()
+                print('com close')
             if not need_update:
                 print('has latest firmware.')
             else:
@@ -882,7 +885,17 @@ class SeeedMode(MicroPythonMode):
         """
         return SHARED_APIS + SEEED_APIS
 
+    def check_firmware_existence(self):
+        hint = 'denit! please make sure there is a Ardupy firmware' + \
+            ' in your board.'
+        if self.info.has_firmware:
+            return True
+        self.__show_message_box(hint)
+        return False
+
     def toggle_repl(self, event):
+        if not self.check_firmware_existence():
+            return
         if self.fs is None:
             if self.repl:
                 # Remove REPL
@@ -905,6 +918,8 @@ class SeeedMode(MicroPythonMode):
         """
         Check for the existence of the file pane before toggling plotter.
         """
+        if not self.check_firmware_existence():
+            return
         if self.fs is None:
             super().toggle_plotter(event)
             if self.plotter:
@@ -957,6 +972,8 @@ class SeeedMode(MicroPythonMode):
         Check for the existence of the REPL or plotter before toggling the file
         system navigator for the MicroPython device on or off.
         """
+        if not self.check_firmware_existence():
+            return
         if self.repl:
             message = _("File system cannot work at the same time as the "
                         "REPL or plotter.")
