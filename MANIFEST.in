@@ -1,3 +1,5 @@
+include mu/resources/seeed/tools-win/*
+
 include mu/*
 include README.rst
 include CHANGES.rst
@@ -7,7 +9,6 @@ include mu/resources/css/*
 include mu/resources/images/*
 include mu/resources/fonts/*
 include mu/resources/pygamezero/*
-include mu/resources/seeed/*.*
+include mu/resources/seeed/*
 include run.py
 recursive-include mu/locale *
-include mu/resources/seeed/tools-posix/*

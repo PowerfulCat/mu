@@ -93,7 +93,9 @@ class Info:
     @staticmethod
     def path_tools(child):
         if os.name == 'posix':
-            return path(child, 'seeed/tools-posix/')
+            if platform.uname().system == 'Darwin':
+                return path(child, 'seeed/tools-darwin/')
+            return path(child, 'seeed/tools-linux/')
         else:
             return path(child, 'seeed/tools-win/')
 
@@ -696,6 +698,7 @@ class FirmwareUpdater(QThread):
 
             if download(self.info.config_path,
                         self.info.cloud_config_path):
+                print('finished download')
                 self.info.load_config()
                 new_version = self.info.version
 

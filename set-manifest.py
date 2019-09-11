@@ -1,5 +1,5 @@
 import os
-import sys
+import platform
 inc = '''
 include mu/*
 include README.rst
@@ -16,7 +16,10 @@ recursive-include mu/locale *
 '''
 file = open('MANIFEST.in', 'w')
 if os.name == 'posix':
-    file.write('include mu/resources/seeed/tools-posix/*\n' + inc)
+    if platform.uname().system == 'Darwin':
+        file.write('include mu/resources/seeed/tools-darwin/*' + inc)
+    else:
+        file.write('include mu/resources/seeed/tools-posix/*' + inc)
 elif os.name == 'nt':
-    file.write('include mu/resources/seeed/tools-win/*\n' + inc)
+    file.write('include mu/resources/seeed/tools-win/*' + inc)
 file.close()
